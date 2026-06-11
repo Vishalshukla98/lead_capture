@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Telkosh Newsletter</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: system-ui, Arial, sans-serif;
+        background: #f6f7fb;
+        color: #111;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+      }
+      .card {
+        background: white;
+        padding: 28px;
+        border-radius: 10px;
+        box-shadow: 0 6px 24px rgba(20, 20, 40, 0.08);
+        width: 100%;
+        max-width: 420px;
+      }
+      h1 {
+        font-size: 20px;
+        margin-bottom: 8px;
+      }
+      p.lead {
+        color: #555;
+        margin-bottom: 16px;
+      }
+      form {
+        display: flex;
+        gap: 8px;
+      }
+      input[type="email"] {
+        flex: 1;
+        padding: 10px 12px;
+        border: 1px solid #dcdfe6;
+        border-radius: 6px;
+        font-size: 14px;
+      }
+      button {
+        padding: 10px 14px;
+        border-radius: 6px;
+        border: 0;
+        background: #2563eb;
+        color: white;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .msg {
+        margin-top: 12px;
+        font-size: 14px;
+      }
+      .msg.error {
+        color: #b91c1c;
+      }
+      .msg.success {
+        color: #047857;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Join the Telkosh Newsletter</h1>
+      <p class="lead">Get updates and exclusive offers. No spam.</p>
+
+      <form
+        id="subscribeForm"
+        onsubmit="
+          subscribe();
+          return false;
+        "
+      >
+        <input
+          id="email"
+          type="email"
+          placeholder="Enter your email"
+          required
+          autocomplete="email"
+        />
+        <button onclick="subscribe()">Subscribe</button>
+      </form>
+
+      <p id="message"></p>
+    </div>
+
+    <script>
+      async function subscribe() {
+        const email = document.getElementById("email").value;
+        const message = document.getElementById("message");
+
+        if (!email) {
+          message.style.color = "red";
+          message.innerText = "Please enter an email address";
+          return;
+        }
+
+        try {
+          const response = await fetch("http://localhost:5000/subscribe", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              email: email,
+            }),
+          });
+
+          const data = await response.json();
+
+          if (data.success) {
+            message.style.color = "green";
+            message.innerText = "✅ Successfully subscribed!";
+
+            document.getElementById("email").value = "";
+          } else {
+            message.style.color = "red";
+            message.innerText = data.message || "Subscription failed";
+          }
+        } catch (error) {
+          console.error(error);
+
+          message.style.color = "red";
+          message.innerText = "❌ Server connection error";
+        }
+      }
+    </script>
+  </body>
+</html>
