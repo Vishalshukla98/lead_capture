@@ -3,51 +3,44 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 
 const app = express();
 
-app.use(cors());
+// ─── CORS ────────────────────────────────────────────────────────────────────
+// Restrict to your Netlify domain in production.
+// Add localhost for local dev if needed.
+app.use(
+  cors({
+    origin: [
+      process.env.FRONTEND_URL || "https://your-site.netlify.app",
+      "http://localhost:3000",
+    ],
+  }),
+);
+
 app.use(express.json());
 
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-  tls: {
-    rejectUnauthorized: false,
-  },
-});
+// ─── Resend client ───────────────────────────────────────────────────────────
+// Resend uses HTTPS (port 443) — works on Render free tier.
+// Gmail SMTP (port 587) is blocked by Render free tier — do not use.
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-transporter.verify((error, success) => {
-  if (error) {
-    console.log("❌ Gmail Connection Error");
-    console.log(error);
-  } else {
-    console.log("✅ Gmail Server Ready");
-  }
-});
+const ADMIN_EMAIL = "marketing@telkosh.com";
+const FROM_EMAIL = "Telkosh <marketing@telkosh.com>";
 
+// ─── Routes ──────────────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
   res.send("Newsletter API Working ✅");
 });
 
 app.get("/health", (req, res) => {
-  res.json({
-    status: "OK",
-  });
+  res.json({ status: "OK" });
 });
 
-app.get("/subscribe", (req, res) => {
-  res.send("Subscribe endpoint is running ✅");
-});
-
+// ─── Subscribe ───────────────────────────────────────────────────────────────
 app.post("/subscribe", async (req, res) => {
-  const { email } = req.body;
+  const { email, name } = req.body;
 
   if (!email || !email.includes("@")) {
     return res.status(400).json({
@@ -59,104 +52,63 @@ app.post("/subscribe", async (req, res) => {
   console.log("=================================");
   console.log("New subscription request");
   console.log("Email:", email);
+  if (name) console.log("Name:", name);
+
+  // ── Step 1: HubSpot ────────────────────────────────────────────────────────
+  try {
+    const hubspotProperties = { email };
+    if (name) hubspotProperties.firstname = name;
+
+    const response = await axios.post(
+      "https://api.hubapi.com/crm/v3/objects/contacts",
+      { properties: hubspotProperties },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+
+    console.log("✅ Contact created in HubSpot, ID:", response.data.id);
+  } catch (hubspotError) {
+    if (hubspotError.response?.status === 409) {
+      console.log("⚠ Contact already exists in HubSpot");
+    } else {
+      console.log("❌ HubSpot Error:", hubspotError.message);
+      // Non-fatal: continue to send emails even if HubSpot fails
+    }
+  }
+
+  // ── Step 2: Admin notification email ──────────────────────────────────────
+  console.log("Sending admin notification email...");
 
   try {
-    // HubSpot Contact
-    try {
-      const response = await axios.post(
-        "https://api.hubapi.com/crm/v3/objects/contacts",
-        {
-          properties: {
-            email: email,
-          },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-        },
-      );
-
-      console.log("✅ Contact created in HubSpot");
-      console.log("Contact ID:", response.data.id);
-    } catch (hubspotError) {
-      if (hubspotError.response?.status === 409) {
-        console.log("⚠ Contact already exists in HubSpot");
-      } else {
-        console.log("HubSpot Error:", hubspotError.message);
-      }
-    }
-
-    // Admin Email
-    console.log("Sending admin email...");
-
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: process.env.EMAIL_USER,
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: ADMIN_EMAIL,
       subject: "New Newsletter Subscriber",
       html: `
         <h2>New Subscriber</h2>
         <p><strong>Email:</strong> ${email}</p>
+        ${name ? `<p><strong>Name:</strong> ${name}</p>` : ""}
       `,
     });
 
     console.log("✅ Admin email sent");
-
-    // Thank You Email
-    console.log("Sending thank you email...");
-
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Welcome to Telkosh Newsletter",
-      html: `
-        <h2>Thank You for Subscribing!</h2>
-
-        <p>Hello,</p>
-
-        <p>
-          Thank you for subscribing to the Telkosh Newsletter.
-        </p>
-
-        <p>
-          You'll receive updates about:
-        </p>
-
-        <ul>
-          <li>Bulk SMS Services</li>
-          <li>WhatsApp Business API</li>
-          <li>OTP Solutions</li>
-          <li>Industry Updates</li>
-        </ul>
-
-        <br>
-
-        <p>
-          Regards,<br>
-          <strong>Telkosh Team</strong>
-        </p>
-      `,
-    });
-
-    console.log("✅ Thank you email sent");
-
-    return res.status(200).json({
-      success: true,
-      message: "Successfully subscribed",
-    });
-  } catch (error) {
-    console.log("❌ ERROR OCCURRED");
-
-    console.log(error);
-
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+  } catch (adminEmailError) {
+    console.log("❌ Admin email failed:", adminEmailError.message);
+    // Non-fatal: continue to send thank-you email
   }
+
+  // ── Step 3: Return success ────────────────────────────────────────────────
+  return res.status(200).json({
+    success: true,
+    message: "Successfully subscribed",
+  });
 });
 
+// ─── Start server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
