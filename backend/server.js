@@ -1,8 +1,8 @@
 require("dotenv").config();
 
 const express = require("express");
-const axios = require("axios");
 const cors = require("cors");
+const axios = require("axios");
 const nodemailer = require("nodemailer");
 
 const app = express();
@@ -11,11 +11,22 @@ app.use(cors());
 app.use(express.json());
 
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+});
+
+transporter.verify((error) => {
+  if (error) {
+    console.log("SMTP ERROR");
+    console.log(error);
+  } else {
+    console.log("✅ Gmail Server Ready");
+  }
 });
 
 app.get("/", (req, res) => {
@@ -25,8 +36,6 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => {
   res.json({
     status: "OK",
-    message: "Newsletter API is running",
-    time: new Date(),
   });
 });
 
@@ -35,143 +44,163 @@ app.get("/subscribe", (req, res) => {
 });
 
 app.post("/subscribe", async (req, res) => {
+
   const { email } = req.body;
 
-  if (!email || !email.includes("@")) {
+  if (!email) {
     return res.status(400).json({
       success: false,
-      message: "Valid email is required",
+      message: "Email is required",
     });
   }
 
-  console.log("=================================");
+  console.log("================================");
   console.log("New subscription request");
   console.log("Email:", email);
 
-  let hubspotData = null;
-
   try {
-    console.log("Creating contact in HubSpot...");
 
     try {
-      const response = await axios.post(
+
+      await axios.post(
         "https://api.hubapi.com/crm/v3/objects/contacts",
         {
           properties: {
-            email: email,
+            email,
           },
         },
         {
           headers: {
-            Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}`,
-            "Content-Type": "application/json",
+            Authorization:
+              `Bearer ${process.env.HUBSPOT_TOKEN}`,
+            "Content-Type":
+              "application/json",
           },
-        },
+        }
       );
 
-      hubspotData = response.data;
+      console.log("✅ Contact added to HubSpot");
 
-      console.log("✅ Contact created in HubSpot");
-      console.log("Contact ID:", response.data.id);
     } catch (hubspotError) {
-      if (hubspotError.response && hubspotError.response.status === 409) {
-        console.log("⚠ Contact already exists in HubSpot");
+
+      if (
+        hubspotError.response &&
+        hubspotError.response.status === 409
+      ) {
+
+        console.log(
+          "⚠ Contact already exists in HubSpot"
+        );
+
       } else {
-        throw hubspotError;
+
+        console.log(
+          "HubSpot Error:",
+          hubspotError.message
+        );
+
       }
     }
 
-    console.log("Sending admin notification email...");
+    console.log(
+      "Sending admin notification..."
+    );
 
     await transporter.sendMail({
-      from: `"Telkosh" <${process.env.EMAIL_USER}>`,
+
+      from: process.env.EMAIL_USER,
+
       to: process.env.EMAIL_USER,
-      subject: "New Newsletter Subscriber",
+
+      subject:
+        "New Newsletter Subscriber",
+
       html: `
-        <div style="font-family:Arial,sans-serif;padding:20px;">
-          <h2>New Newsletter Subscriber</h2>
-          <p><strong>Email:</strong> ${email}</p>
-        </div>
+        <h2>New Newsletter Lead</h2>
+        <p>Email: ${email}</p>
       `,
     });
 
-    console.log("✅ Admin notification email sent");
+    console.log(
+      "✅ Admin email sent"
+    );
 
-    console.log("Sending thank you email...");
+    console.log(
+      "Sending thank-you email..."
+    );
 
     await transporter.sendMail({
-      from: `"Telkosh" <${process.env.EMAIL_USER}>`,
+
+      from: process.env.EMAIL_USER,
+
       to: email,
-      subject: "Thank You for Subscribing to Telkosh",
+
+      subject:
+        "Thank You For Subscribing",
+
       html: `
-        <div style="font-family:Arial,sans-serif;padding:20px;">
-          <h2>Thank You for Subscribing!</h2>
+      <div style="font-family:Arial;padding:20px;">
+      
+      <h2>Thank You For Subscribing</h2>
 
-          <p>Hello,</p>
+      <p>
+      Thank you for subscribing to the
+      Telkosh Newsletter.
+      </p>
 
-          <p>
-            Thank you for subscribing to the Telkosh newsletter.
-          </p>
+      <p>
+      You'll receive updates on:
+      </p>
 
-          <p>
-            You'll receive updates about:
-          </p>
+      <ul>
+      <li>Bulk SMS</li>
+      <li>WhatsApp Business API</li>
+      <li>OTP Solutions</li>
+      <li>Industry Updates</li>
+      </ul>
 
-          <ul>
-            <li>Bulk SMS Services</li>
-            <li>WhatsApp Business API</li>
-            <li>OTP Solutions</li>
-            <li>Industry Updates</li>
-          </ul>
+      <br>
 
-          <br>
+      <p>
+      Regards,<br>
+      Telkosh Team
+      </p>
 
-          <p>
-            Regards,<br>
-            <strong>Telkosh Team</strong>
-          </p>
-        </div>
+      </div>
       `,
     });
 
-    console.log("✅ Thank you email sent");
+    console.log(
+      "✅ Thank-you email sent"
+    );
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: "Subscription successful",
-      data: hubspotData,
+      message:
+        "Successfully subscribed",
     });
+
   } catch (error) {
+
     console.log("❌ ERROR OCCURRED");
 
-    if (error.response) {
-      console.log("Status:", error.response.status);
-      console.log("Data:", error.response.data);
-    } else {
-      console.log("Message:", error.message);
-    }
+    console.log(error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: "Subscription failed",
-      error: error.response?.data || error.message,
+      message:
+        "Subscription failed",
     });
   }
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT =
+process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log("=================================");
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📧 EMAIL_USER: ${process.env.EMAIL_USER}`);
-  console.log("=================================");
-});
 
-transporter.verify(function (error) {
-  if (error) {
-    console.log(error);
-  } else {
-    console.log("✅ Gmail Server Ready");
-  }
+  console.log(
+    `🚀 Server running on port ${PORT}`
+  );
+
 });
